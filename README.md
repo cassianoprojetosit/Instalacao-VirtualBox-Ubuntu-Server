@@ -1,389 +1,179 @@
-# 🖥️ Instalação Profissional do VirtualBox Headless em Ubuntu Server
+<h1 align="center">🖥️ Instalação Profissional do VirtualBox Headless em Ubuntu Server</h1>
 
 <div align="center">
-  <img src="https://img.shields.io/badge/VirtualBox-7.0+-blue?style=for-the-badge&logo=virtualbox" alt="VirtualBox 7.0+">
-  <img src="https://img.shields.io/badge/Ubuntu_Server-20.04+-orange?style=for-the-badge&logo=ubuntu" alt="Ubuntu Server 20.04+">
-  <img src="https://img.shields.io/badge/Script-Bash-4EAA25?style=for-the-badge&logo=gnu-bash" alt="Script Bash">
-  <img src="https://img.shields.io/badge/Modo-Headless-black?style=for-the-badge" alt="Modo Headless">
+  <h3>Instalação automatizada do Oracle VirtualBox + Extension Pack via Script Bash</h3>
 </div>
 
-Documentação técnica completa para instalação automatizada do Oracle VirtualBox em Ubuntu Server sem interface gráfica.
-
-## 📋 Índice
-
-*   [🎯 Objetivo](#-objetivo)
-*   [🧠 Visão Geral da Arquitetura](#-visão-geral-da-arquitetura)
-*   [⚙️ Estratégia de Instalação](#%EF%B8%8F-estratégia-de-instalação)
-*   [📜 Script de Instalação Automatizada](#-script-de-instalação-automatizada)
-*   [🔎 Descrição Técnica dos Comandos](#-descrição-técnica-dos-comandos)
-*   [🚀 Fluxo Executado Durante Instalação](#-fluxo-executado-durante-instalação)
-*   [✅ Testes Pós-Instalação (OBRIGATÓRIO)](#-testes-pós-instalação-obrigatório)
-*   [🔄 Manutenção Futura](#-manutenção-futura)
-*   [⚠️ Boas Práticas em Servidores](#%EF%B8%8F-boas-práticas-em-servidores)
-*   [🛠️ Troubleshooting](#%EF%B8%8F-troubleshooting)
-*   [📈 Evolução Futura Recomendada](#-evolução-futura-recomendada)
-
-## 🎯 Objetivo
-
-Documentar o processo completo e automatizado de instalação do Oracle VirtualBox em Ubuntu Server (headless) utilizando:
-
-*   ✅ Script Bash profissional com boas práticas
-*   ✅ Repositório oficial Oracle
-*   ✅ Extension Pack automático e compatível
-*   ✅ Segurança, idempotência e logs estruturados
-*   ✅ Base para automação em larga escala
-
-## 🧠 Visão Geral da Arquitetura
-
-**Ambiente-alvo:**
-
-*   Servidor bare metal rodando Ubuntu Server
-*   CPU com virtualização habilitada (AMD-V ou Intel VT-x)
-*   Sem interface gráfica (modo headless)
-*   Gerenciamento via CLI (VBoxManage)
-
-**Modelo conceitual:**
-
-```text
-┌─────────────────┐
-│    Hardware     │
-│  (CPU, RAM, IO) │
-└────────┬────────┘
-         ↓
-┌─────────────────┐
-│  Ubuntu Server  │
-│  (kernel Linux) │
-└────────┬────────┘
-         ↓
-┌─────────────────┐
-│   VirtualBox    │
-│  (VBoxManage)   │
-└────────┬────────┘
-         ↓
-┌─────────────────┐
-│   Máquinas      │
-│   Virtuais      │
-└─────────────────┘
-```
-
-## ⚙️ Estratégia de Instalação
-
-Script automatizado com execução idempotente (pode rodar múltiplas vezes sem quebrar). Responsabilidades:
-
-| Etapa | Descrição |
-| :---- | :-------- |
-| 🔍    | Validar suporte à virtualização na CPU |
-| 📦    | Instalar dependências essenciais |
-| 🔑    | Adicionar repositório oficial Oracle |
-| 🖥️    | Instalar VirtualBox estável |
-| 🔢    | Detectar versão instalada automaticamente |
-| 📥    | Baixar Extension Pack compatível |
-| 🧩    | Instalar extensão com aceite de licença |
-| ⚡    | Recompilar módulos do kernel |
-| ✅    | Validar instalação completa |
-
-## 📜 Script de Instalação Automatizada
-
-```bash
-#!/usr/bin/env bash
-#
-# Script: install-virtualbox-headless.sh
-# Descrição: Instalação automatizada do VirtualBox Headless + Extension Pack
-# Uso: sudo ./install-virtualbox-headless.sh
-
-set -euo pipefail
-
-# Cores
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-NC='\033[0m'
-
-log() {
-    echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')]${NC} $1"
-}
-
-error() {
-    echo -e "${RED}[ERRO]${NC} $1"
-    exit 1
-}
-
-# Verificar root
-if [[ $EUID -ne 0 ]]; then
-    error "Execute como root ou sudo"
-fi
-
-# Verificar virtualização
-log "🔍 Verificando suporte à virtualização..."
-if egrep -q '(vmx|svm)' /proc/cpuinfo; then
-    log "✅ Virtualização suportada"
-else
-    error "Virtualização não habilitada na BIOS"
-fi
-
-# Atualizar sistema e dependências
-log "📦 Instalando dependências..."
-apt-get update
-apt-get install -y \
-    wget \
-    curl \
-    gnupg2 \
-    software-properties-common \
-    apt-transport-https \
-    ca-certificates \
-    dkms \
-    build-essential \
-    linux-headers-generic \
-    lsb-release
-
-# Adicionar chave Oracle
-log "🔑 Configurando repositório Oracle VirtualBox..."
-wget -qO- https://www.virtualbox.org/download/oracle_vbox_2016.asc \
-| gpg --dearmour -o /usr/share/keyrings/oracle-virtualbox.gpg
-
-if [[ ! -f /usr/share/keyrings/oracle-virtualbox.gpg ]]; then
-    error "Falha ao importar chave GPG"
-fi
-
-# Adicionar repo
-echo "deb [arch=amd64 signed-by=/usr/share/keyrings/oracle-virtualbox.gpg] https://download.virtualbox.org/virtualbox/debian $(lsb_release -cs) contrib" \
-> /etc/apt/sources.list.d/virtualbox.list
-
-# Instalar VirtualBox
-log "🖥️ Instalando VirtualBox..."
-apt-get update
-apt-get install -y virtualbox-7.0
+<hr>
+
+<h2>🎯 Objetivo</h2>
+<p>
+Documentar a instalação automatizada do VirtualBox em Ubuntu Server sem interface gráfica,
+baseado diretamente no script <b>install-virtualbox-headless.sh</b>.
+</p>
+
+<ul>
+<li>Instala VirtualBox 7.0</li>
+<li>Baixa Extension Pack compatível automaticamente</li>
+<li>Configura módulos do kernel</li>
+<li>Executa validação final da instalação</li>
+</ul>
+
+<hr>
+
+<h2>🧠 Arquitetura</h2>
+
+<pre>
+Hardware
+   ↓
+Ubuntu Server (Kernel Linux)
+   ↓
+VirtualBox Headless (VBoxManage)
+   ↓
+Máquinas Virtuais
+</pre>
+
+<hr>
+
+<h2>⚙️ Estratégia de Instalação</h2>
+
+<table border="1" cellpadding="8">
+<tr><th>Etapa</th><th>Descrição</th></tr>
+<tr><td>Root</td><td>Valida execução via sudo/root</td></tr>
+<tr><td>CPU</td><td>Verifica suporte vmx/svm</td></tr>
+<tr><td>Dependências</td><td>Instala pacotes essenciais</td></tr>
+<tr><td>Repo Oracle</td><td>Configura chave GPG e source list</td></tr>
+<tr><td>Instalação</td><td>Instala virtualbox-7.0</td></tr>
+<tr><td>Versão</td><td>Detecta versão via VBoxManage</td></tr>
+<tr><td>Extension Pack</td><td>Download automático compatível</td></tr>
+<tr><td>Módulos</td><td>Executa vboxconfig ou modprobe</td></tr>
+<tr><td>Validação</td><td>Executa VBoxManage -v</td></tr>
+</table>
+
+<hr>
+
+<h2>📦 Dependências Instaladas</h2>
+
+<pre>
+wget
+curl
+gnupg2
+software-properties-common
+apt-transport-https
+ca-certificates
+dkms
+build-essential
+linux-headers-generic
+lsb-release
+</pre>
+
+<hr>
+
+<h2>🚀 Fluxo Real Executado pelo Script</h2>
+
+<ol>
+<li>Valida execução como root</li>
+<li>Verifica virtualização da CPU</li>
+<li>Atualiza apt</li>
+<li>Instala dependências</li>
+<li>Baixa chave GPG Oracle</li>
+<li>Cria keyring em /usr/share/keyrings</li>
+<li>Cria repo virtualbox.list</li>
+<li>Instala virtualbox-7.0</li>
+<li>Valida VBoxManage</li>
+<li>Detecta versão instalada</li>
+<li>Baixa Extension Pack compatível</li>
+<li>Instala Extension Pack automaticamente</li>
+<li>Executa vboxconfig ou modprobe</li>
+<li>Remove arquivo temporário</li>
+<li>Mostra versão final instalada</li>
+</ol>
+
+<hr>
+
+<h2>🔎 Comandos Técnicos Utilizados</h2>
+
+<h3>Modo Seguro Bash</h3>
+
+<pre>set -euo pipefail</pre>
+
+<ul>
+<li>-e → interrompe em erro</li>
+<li>-u → bloqueia variáveis inexistentes</li>
+<li>pipefail → captura erro em pipelines</li>
+</ul>
+
+<h3>Detecção de Virtualização</h3>
+
+<pre>egrep -q '(vmx|svm)' /proc/cpuinfo</pre>
 
-# Validar instalação
-command -v VBoxManage >/dev/null || error "VirtualBox não foi instalado corretamente"
+<ul>
+<li>vmx → Intel VT-x</li>
+<li>svm → AMD-V</li>
+</ul>
 
-# Detectar versão
-VB_VERSION=$(VBoxManage -v | cut -d 'r' -f1)
-log "📌 Versão detectada: $VB_VERSION"
+<h3>Detecção da Versão VirtualBox</h3>
 
-# Baixar Extension Pack
-EXT_PACK="Oracle_VM_VirtualBox_Extension_Pack-${VB_VERSION}.vbox-extpack"
-log "📥 Baixando Extension Pack..."
-wget -q "https://download.virtualbox.org/virtualbox/${VB_VERSION}/${EXT_PACK}" -O "/tmp/${EXT_PACK}"
+<pre>VBoxManage -v | cut -d 'r' -f1</pre>
 
-# Instalar Extension Pack
-log "🧩 Instalando Extension Pack..."
-yes | VBoxManage extpack install --replace "/tmp/${EXT_PACK}"
+<h3>Instalação Automática do Extension Pack</h3>
 
-# Recompilar módulos
-log "⚡ Configurando módulos do kernel..."
-if command -v vboxconfig &> /dev/null; then
-    /sbin/vboxconfig
-else
-    log "vboxconfig não encontrado, carregando módulo manualmente"
-    modprobe vboxdrv || error "Falha ao carregar módulo vboxdrv"
-fi
+<pre>yes | VBoxManage extpack install --replace</pre>
 
-# Limpeza
-rm -f "/tmp/${EXT_PACK}"
+<hr>
 
-# Validação final
-log "✅ Instalação concluída!"
-VBoxManage -v
+<h2>✅ Testes Pós Instalação</h2>
 
-```
+<h3>Versão</h3>
+<pre>VBoxManage -v</pre>
 
-## 🔎 Descrição Técnica dos Comandos
+<h3>Extension Pack</h3>
+<pre>VBoxManage list extpacks</pre>
 
-### Shebang e Modo Seguro
+<h3>Módulos Kernel</h3>
+<pre>lsmod | grep vbox</pre>
 
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-```
-
-| Flag     | Efeito                               |
-| :------- | :----------------------------------- |
-| `-e`     | Interrompe execução ao primeiro erro |
-| `-u`     | Impede uso de variáveis não declaradas |
-| `pipefail` | Captura falhas em pipelines          |
-
-### Verificação de Virtualização
-
-```bash
-egrep -q '(vmx|svm)' /proc/cpuinfo
-```
-
-| Flag  | Detecção    |
-| :---- | :---------- |
-| `vmx` | Intel VT-x  |
-| `svm` | AMD-V       |
-
-### Adição da Chave GPG
-
-```bash
-wget -qO- URL | gpg --dearmour -o /usr/share/keyrings/...
-```
-
-**Por quê?** Converte chave ASCII para formato binário seguro, exigido pelo `signed-by` no `sources.list`.
-
-### Detecção do Codename Ubuntu
-
-```bash
-lsb_release -cs
-```
-
-**Retorna:** `jammy` (22.04), `noble` (24.04) ou `focal` (20.04)
-
-### Parsing da Versão VirtualBox
-
-```bash
-VBoxManage -v | cut -d 'r' -f1
-```
-
-**Exemplo:** `7.0.14r161095` → `7.0.14`
-
-### Instalação Automática do Extension Pack
-
-```bash
-yes | VBoxManage extpack install --replace "/tmp/${EXT_PACK}"
-```
-
-*   `yes`: Auto-aceita o contrato de licença
-*   `--replace`: Substitui versão anterior se existir
-
-## 🚀 Fluxo Executado Durante Instalação
-
-*(O conteúdo original não forneceu um fluxo detalhado, apenas um título. Se houver um diagrama ou descrição, ele deve ser inserido aqui.)*
-
-## ✅ Testes Pós-Instalação (OBRIGATÓRIO)
-
-### 1. Versão instalada
-
-```bash
-VBoxManage -v
-```
-
-**Esperado:** `7.0.14` (ou superior)
-
-### 2. Extension Pack ativo
-
-```bash
-VBoxManage list extpacks
-```
-
-**Esperado:**
-
-```text
-Extension Packs: 1
-Pack no. 0:   Oracle VM VirtualBox Extension Pack
-Version:      7.0.14
-Status:       usable
-```
-
-### 3. Módulos do kernel carregados
-
-```bash
-lsmod | grep vbox
-```
-
-**Esperado:**
-
-```text
-vboxdrv
-vboxnetflt
-vboxnetadp
-```
-
-### 4. Criação de VM de teste
-
-```bash
+<h3>Criar VM Teste</h3>
+<pre>
 VBoxManage createvm --name teste --register
 VBoxManage list vms
-```
+</pre>
 
-## 🔄 Manutenção Futura
+<hr>
 
-### Atualizar VirtualBox
+<h2>🔄 Manutenção</h2>
 
-```bash
+<h3>Atualizar VirtualBox</h3>
+
+<pre>
 sudo apt update
 sudo apt upgrade
-sudo /sbin/vboxconfig   # obrigatório após upgrade
-```
-
-### Atualizar Extension Pack
-
-**Recomendação:** Reexecutar o script completo. Ele:
-
-*   Detecta nova versão do VirtualBox
-*   Baixa o Extension Pack correspondente
-*   Substitui a versão antiga automaticamente
-
-### Atualizações de Kernel
-
-Sempre que o kernel for atualizado:
-
-```bash
 sudo /sbin/vboxconfig
-```
+</pre>
 
-## ⚠️ Boas Práticas em Servidores
+<h3>Atualizar Extension Pack</h3>
 
-*   🚫 Não misturar VirtualBox com KVM no mesmo host
-*   📊 Monitorar consumo de RAM das VMs (`vboxmanage showvminfo`)
-*   💾 Snapshots com moderação (impacto em performance)
-*   🔒 Isolar redes das VMs quando necessário (host-only vs NAT)
-*   📀 Backups automatizados dos discos VDI
-*   🔄 Manter kernel atualizado por segurança
-*   📝 Documentar todas as VMs e suas finalidades
+<p>Reexecute o script completo.</p>
 
-## 🛠️ Troubleshooting
+<hr>
 
-### Problema: Módulos não carregam após boot
+<h2>⚠️ Troubleshooting</h2>
 
-```bash
-sudo /sbin/vboxconfig
-```
+<h3>Módulos não carregam</h3>
 
-### Problema: Extension Pack incompatível
+<pre>sudo /sbin/vboxconfig</pre>
 
-```bash
-# Remover extensão atual
-VBoxManage extpack uninstall "Oracle VM VirtualBox Extension Pack"
+<h3>Erro DKMS</h3>
 
-# Reinstalar via script
-./install-virtualbox-headless.sh
-```
+<pre>
+sudo apt install --reinstall build-essential dkms linux-headers-$(uname -r)
+</pre>
 
-### Problema: Erro DKMS / headers não encontrados
+<h3>Falha módulo manual</h3>
 
-```bash
-sudo apt install --reinstall \
-    build-essential \
-    dkms \
-    linux-headers-$(uname -r)
-```
+<pre>modprobe vboxdrv</pre>
 
-### Problema: VirtualBox não inicia VMs
+<hr>
 
-```bash
-# Verificar usuário no grupo vboxusers
-sudo usermod -aG vboxusers $USER
-
-# Verificar permissões do dispositivo
-ls -la /dev/vboxdrv
-```
-
-## 📈 Evolução Futura Recomendada
-
-Para ambientes de produção e alta densidade, considerar migração para:
-
-| Tecnologia        | Benefício                               |
-| :---------------- | :-------------------------------------- |
-| KVM/libvirt       | Performance nativa, suporte em clouds   |
-| cloud-init        | Provisionamento automatizado            |
-| Templates         | Imagens base padronizadas               |
-| Ansible/Terraform | Infraestrutura como código              |
-| Proxmox VE        | Plataforma completa de virtualização    |
-
-<div align="center">
-  📌 **Nota:** VirtualBox é excelente para laboratórios, testes e desenvolvimento. Para produção crítica, avalie hipervisores tipo 1 (KVM, ESXi, Hyper-V).
-
-  Documento mantido pela equipe de Infraestrutura
-  Última atualização: 12/02/2026
-</div>
+<h2 align="center">📌 Documento baseado diretamente no script install-virtualbox-headless.sh</h2>
+<p align="center">Criado por Cassiano Projetos IT</p>
