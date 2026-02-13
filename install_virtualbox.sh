@@ -1,124 +1,99 @@
 #!/usr/bin/env bash
+#
+# Script: install-virtualbox-headless.sh
+# Descrição: Instalação automatizada do VirtualBox Headless + Extension Pack
+# Uso: sudo ./install-virtualbox-headless.sh
+
 set -euo pipefail
 
-########################################
-# CONFIG
-########################################
-
-KEYRING_PATH="/usr/share/keyrings/virtualbox.gpg"
-REPO_FILE="/etc/apt/sources.list.d/virtualbox.list"
-
-########################################
-# FUNÇÕES
-########################################
+# Cores
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+NC='\033[0m'
 
 log() {
-    echo -e "\n[INFO] $1"
+    echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')]${NC} $1"
 }
 
-error_exit() {
-    echo "[ERRO] $1" >&2
+error() {
+    echo -e "${RED}[ERRO]${NC} $1"
     exit 1
 }
 
-require_root_sudo() {
-    if ! sudo -n true 2>/dev/null; then
-        echo "[INFO] sudo vai solicitar senha..."
-        sudo true
-    fi
-}
+# Verificar root
+if [[ $EUID -ne 0 ]]; then
+    error "Execute como root ou sudo"
+fi
 
-check_virtualization() {
-    log "Verificando suporte a virtualização..."
-    if ! egrep -q '(vmx|svm)' /proc/cpuinfo; then
-        error_exit "Virtualização não habilitada na BIOS (AMD-V / VT-x)."
-    fi
-}
+# Verificar virtualização
+log "🔍 Verificando suporte à virtualização..."
+if egrep -q '(vmx|svm)' /proc/cpuinfo; then
+    log "✅ Virtualização suportada"
+else
+    error "Virtualização não habilitada na BIOS"
+fi
 
-install_dependencies() {
-    log "Instalando dependências..."
-    sudo apt-get update -y
-    sudo apt-get install -y \
-        wget \
-        curl \
-        gnupg2 \
-        lsb-release \
-        dkms \
-        build-essential \
-        ca-certificates
-}
+# Atualizar sistema e dependências
+log "📦 Instalando dependências..."
+apt-get update
+apt-get install -y \
+    wget \
+    curl \
+    gnupg2 \
+    software-properties-common \
+    apt-transport-https \
+    ca-certificates \
+    dkms \
+    build-essential \
+    linux-headers-generic \
+    lsb-release
 
-add_oracle_repo() {
+# Adicionar chave Oracle
+log "🔑 Configurando repositório Oracle VirtualBox..."
+wget -qO- https://www.virtualbox.org/download/oracle_vbox_2016.asc \
+| gpg --dearmour -o /usr/share/keyrings/oracle-virtualbox.gpg
 
-    if [ ! -f "$KEYRING_PATH" ]; then
-        log "Adicionando chave Oracle..."
-        wget -qO- https://www.virtualbox.org/download/oracle_vbox_2016.asc | \
-        sudo gpg --dearmor -o "$KEYRING_PATH"
-    else
-        log "Chave Oracle já existe."
-    fi
+if [[ ! -f /usr/share/keyrings/oracle-virtualbox.gpg ]]; then
+    error "Falha ao importar chave GPG"
+fi
 
-    if [ ! -f "$REPO_FILE" ]; then
-        log "Adicionando repositório VirtualBox..."
-        echo "deb [arch=amd64 signed-by=$KEYRING_PATH] \
-https://download.virtualbox.org/virtualbox/debian \
-$(lsb_release -cs) contrib" | \
-        sudo tee "$REPO_FILE" >/dev/null
-    else
-        log "Repositório já configurado."
-    fi
-}
+# Adicionar repo
+echo "deb [arch=amd64 signed-by=/usr/share/keyrings/oracle-virtualbox.gpg] https://download.virtualbox.org/virtualbox/debian $(lsb_release -cs) contrib" \
+> /etc/apt/sources.list.d/virtualbox.list
 
-install_virtualbox() {
-    log "Instalando VirtualBox..."
-    sudo apt-get update -y
-    sudo apt-get install -y virtualbox-7.0
-}
+# Instalar VirtualBox
+log "🖥️ Instalando VirtualBox..."
+apt-get update
+apt-get install -y virtualbox-7.0
 
-install_extension_pack() {
+# Validar instalação
+command -v VBoxManage >/dev/null || error "VirtualBox não foi instalado corretamente"
 
-    log "Detectando versão instalada..."
-    VBOX_VERSION=$(VBoxManage -v | cut -d 'r' -f1)
+# Detectar versão
+VB_VERSION=$(VBoxManage -v | cut -d 'r' -f1)
+log "📌 Versão detectada: $VB_VERSION"
 
-    if [ -z "$VBOX_VERSION" ]; then
-        error_exit "Não foi possível detectar a versão do VirtualBox."
-    fi
+# Baixar Extension Pack
+EXT_PACK="Oracle_VM_VirtualBox_Extension_Pack-${VB_VERSION}.vbox-extpack"
+log "📥 Baixando Extension Pack..."
+wget -q "https://download.virtualbox.org/virtualbox/${VB_VERSION}/${EXT_PACK}" -O "/tmp/${EXT_PACK}"
 
-    log "Versão detectada: $VBOX_VERSION"
+# Instalar Extension Pack
+log "🧩 Instalando Extension Pack..."
+yes | VBoxManage extpack install --replace "/tmp/${EXT_PACK}"
 
-    EXT_PACK="Oracle_VM_VirtualBox_Extension_Pack-${VBOX_VERSION}.vbox-extpack"
-    URL="https://download.virtualbox.org/virtualbox/${VBOX_VERSION}/${EXT_PACK}"
+# Recompilar módulos
+log "⚡ Configurando módulos do kernel..."
+if command -v vboxconfig &> /dev/null; then
+    /sbin/vboxconfig
+else
+    log "vboxconfig não encontrado, carregando módulo manualmente"
+    modprobe vboxdrv || error "Falha ao carregar módulo vboxdrv"
+fi
 
-    if VBoxManage list extpacks | grep -q "$VBOX_VERSION"; then
-        log "Extension Pack já instalado."
-        return
-    fi
+# Limpeza
+rm -f "/tmp/${EXT_PACK}"
 
-    log "Baixando Extension Pack..."
-    wget -q --show-progress "$URL"
-
-    log "Instalando Extension Pack..."
-    yes | sudo VBoxManage extpack install "$EXT_PACK" --replace
-
-    rm -f "$EXT_PACK"
-}
-
-verify_modules() {
-    log "Verificando módulos do kernel..."
-    sudo /sbin/vboxconfig || true
-}
-
-########################################
-# EXECUÇÃO
-########################################
-
-require_root_sudo
-check_virtualization
-install_dependencies
-add_oracle_repo
-install_virtualbox
-install_extension_pack
-verify_modules
-
-log "Instalação concluída com sucesso!"
+# Validação final
+log "✅ Instalação concluída!"
 VBoxManage -v
