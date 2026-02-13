@@ -88,19 +88,16 @@ Script automatizado com execução idempotente (pode rodar múltiplas vezes sem 
 #!/usr/bin/env bash
 #
 # Script: install-virtualbox-headless.sh
-# Descrição: Instalação automatizada do VirtualBox + Extension Pack
-# Autor: Time de Infraestrutura
+# Descrição: Instalação automatizada do VirtualBox Headless + Extension Pack
 # Uso: sudo ./install-virtualbox-headless.sh
 
 set -euo pipefail
 
-# Cores para output
+# Cores
 RED='\033[0;31m'
 GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
 NC='\033[0m'
 
-# Função de log
 log() {
     echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')]${NC} $1"
 }
@@ -110,20 +107,20 @@ error() {
     exit 1
 }
 
-# Verificação de root
+# Verificar root
 if [[ $EUID -ne 0 ]]; then
-    error "Este script deve ser executado como root"
+    error "Execute como root ou sudo"
 fi
 
-# 1. Verificar virtualização
+# Verificar virtualização
 log "🔍 Verificando suporte à virtualização..."
 if egrep -q '(vmx|svm)' /proc/cpuinfo; then
-    log "✅ Virtualização habilitada"
+    log "✅ Virtualização suportada"
 else
-    error "Virtualização não suportada ou desabilitada na BIOS"
+    error "Virtualização não habilitada na BIOS"
 fi
 
-# 2. Atualizar índices e instalar dependências
+# Atualizar sistema e dependências
 log "📦 Instalando dependências..."
 apt-get update
 apt-get install -y \
@@ -135,43 +132,59 @@ apt-get install -y \
     ca-certificates \
     dkms \
     build-essential \
-    linux-headers-$(uname -r) \
+    linux-headers-generic \
     lsb-release
 
-# 3. Adicionar repositório Oracle
-log "🔑 Configurando repositório Oracle..."
-wget -qO- https://www.virtualbox.org/download/oracle_vbox_2016.asc | gpg --dearmour -o /usr/share/keyrings/oracle-virtualbox.gpg
+# Adicionar chave Oracle
+log "🔑 Configurando repositório Oracle VirtualBox..."
+wget -qO- https://www.virtualbox.org/download/oracle_vbox_2016.asc \
+| gpg --dearmour -o /usr/share/keyrings/oracle-virtualbox.gpg
 
-echo "deb [arch=amd64 signed-by=/usr/share/keyrings/oracle-virtualbox.gpg] https://download.virtualbox.org/virtualbox/debian $(lsb_release -cs) contrib" | tee /etc/apt/sources.list.d/virtualbox.list
+if [[ ! -f /usr/share/keyrings/oracle-virtualbox.gpg ]]; then
+    error "Falha ao importar chave GPG"
+fi
 
-# 4. Instalar VirtualBox
-log "🖥️ Instalando VirtualBox 7.0..."
+# Adicionar repo
+echo "deb [arch=amd64 signed-by=/usr/share/keyrings/oracle-virtualbox.gpg] https://download.virtualbox.org/virtualbox/debian $(lsb_release -cs) contrib" \
+> /etc/apt/sources.list.d/virtualbox.list
+
+# Instalar VirtualBox
+log "🖥️ Instalando VirtualBox..."
 apt-get update
 apt-get install -y virtualbox-7.0
 
-# 5. Capturar versão instalada
+# Validar instalação
+command -v VBoxManage >/dev/null || error "VirtualBox não foi instalado corretamente"
+
+# Detectar versão
 VB_VERSION=$(VBoxManage -v | cut -d 'r' -f1)
 log "📌 Versão detectada: $VB_VERSION"
 
-# 6. Download do Extension Pack
-log "📥 Baixando Extension Pack..."
+# Baixar Extension Pack
 EXT_PACK="Oracle_VM_VirtualBox_Extension_Pack-${VB_VERSION}.vbox-extpack"
+log "📥 Baixando Extension Pack..."
 wget -q "https://download.virtualbox.org/virtualbox/${VB_VERSION}/${EXT_PACK}" -O "/tmp/${EXT_PACK}"
 
-# 7. Instalar Extension Pack
+# Instalar Extension Pack
 log "🧩 Instalando Extension Pack..."
 yes | VBoxManage extpack install --replace "/tmp/${EXT_PACK}"
 
-# 8. Recompilar módulos
-log "⚡ Recompilando módulos do kernel..."
-/sbin/vboxconfig
+# Recompilar módulos
+log "⚡ Configurando módulos do kernel..."
+if command -v vboxconfig &> /dev/null; then
+    /sbin/vboxconfig
+else
+    log "vboxconfig não encontrado, carregando módulo manualmente"
+    modprobe vboxdrv || error "Falha ao carregar módulo vboxdrv"
+fi
 
-# 9. Limpeza
+# Limpeza
 rm -f "/tmp/${EXT_PACK}"
 
-# 10. Validação
+# Validação final
 log "✅ Instalação concluída!"
 VBoxManage -v
+
 ```
 
 ## 🔎 Descrição Técnica dos Comandos
